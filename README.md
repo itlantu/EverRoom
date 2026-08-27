@@ -263,7 +263,24 @@ pnpm typecheck    # Type-check every workspace package
 pnpm test         # Run Agent runtime and Gateway tests
 pnpm build        # Build Gateway and Electron
 pnpm package:mac  # Create macOS DMG and ZIP artifacts
+pnpm package:win  # Create a Windows NSIS installer (run on Windows)
 ```
+
+### Desktop releases
+
+Desktop releases are driven by GitHub Actions `release-desktop.yml` ("Release desktop app"). Pushing a `desktop-vX.Y.Z` tag (the version must match the `version` in `apps/desktop/package.json`), or manually running the workflow against such a tag, builds in parallel and publishes to the same GitHub Release (prerelease):
+
+- **macOS arm64**: `EverRoom-<version>-arm64.dmg` and `.zip`
+- **Windows x64**: `EverRoom-<version>-windows-x64.exe` (NSIS installer)
+
+For `workflow_dispatch`, select an existing `desktop-v*` tag as the ref — the tag validation step rejects other refs. The `scheduled-desktop-release.yml` workflow automatically creates a nightly tag and triggers the build every day at 00:00 Asia/Shanghai when main contains an unpublished version.
+
+Signing is optional; builds without signing secrets are produced unsigned with a warning:
+
+- macOS: `MAC_CERTS` (base64 Developer ID `.p12`) and `MAC_CERTS_PASSWORD`
+- Windows: `WIN_CSC_LINK` (base64 code-signing `.pfx`) and `WIN_CSC_KEY_PASSWORD`
+
+Windows packaging depends on native modules and the NSIS toolchain, so it must run on Windows; `pnpm package:win` reproduces the same packaging locally.
 
 ## Gateway and local data
 

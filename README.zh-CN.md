@@ -306,7 +306,24 @@ pnpm typecheck    # 检查所有 workspace 包的类型
 pnpm test         # 运行 Agent runtime 与 Gateway 测试
 pnpm build        # 构建 Gateway 与 Electron
 pnpm package:mac  # 生成 macOS DMG 与 ZIP
+pnpm package:win  # 生成 Windows NSIS 安装包（需在 Windows 上执行）
 ```
+
+### 桌面端发布
+
+桌面端发布由 GitHub Actions 的 `release-desktop.yml`（"Release desktop app"）驱动。向仓库推送 `desktop-vX.Y.Z` tag（版本号需与 `apps/desktop/package.json` 的 `version` 一致），或通过 Actions 页面手动选择该 tag 运行，即可并行构建并发布到同一个 GitHub Release（prerelease）：
+
+- **macOS arm64**：`EverRoom-<version>-arm64.dmg` 与 `.zip`
+- **Windows x64**：`EverRoom-<version>-windows-x64.exe`（NSIS 安装包）
+
+`workflow_dispatch` 手动运行时必须选择已经存在的 `desktop-v*` tag 作为 ref，否则 tag 校验步骤会拒绝执行。维护构建的 `scheduled-desktop-release.yml` 会在每日 00:00（Asia/Shanghai）自动检查 main，为未发布版本创建 nightly tag 并触发构建。
+
+签名配置（均为可选，未配置时产出未签名构建并输出警告）：
+
+- macOS：`MAC_CERTS`（Base64 编码的 Developer ID `.p12`）与 `MAC_CERTS_PASSWORD`
+- Windows：`WIN_CSC_LINK`（Base64 编码的代码签名 `.pfx`）与 `WIN_CSC_KEY_PASSWORD`
+
+Windows 打包依赖原生模块与 NSIS 工具链，需要最终在 Windows 上执行；本地可运行 `pnpm package:win` 复现相同的打包过程。
 
 ## Gateway
 
