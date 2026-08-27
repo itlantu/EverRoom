@@ -25,10 +25,24 @@ const names = [
 // 否则 gateway 的整数/布尔解析在打包版里直接崩（Invalid NXCORE_NANGO_CONNECTOR_POLL_MS）。
 const value = (name) => process.env[name].replace(/^"(.*)"$/, '$1')
 
+// 发布构建（tag 触发）要求配置完整；本地/分支验证构建可显式开启
+// ALLOW_EMPTY_PACKAGED_ENV=1，缺失项写成空串，仅用于验证打包链路。
+const allowEmpty = process.env.ALLOW_EMPTY_PACKAGED_ENV === '1'
 const missing = names.filter((name) => !process.env[name])
-if (missing.length) throw new Error(`Missing packaged environment variables: ${missing.join(', ')}`)
+if (missing.length && !allowEmpty) {
+  throw new Error(`Missing packaged environment variables: ${missing.join(', ')}`)
+}
+
+const values = Object.fromEntries(names.map((name) => {
+  const raw = process.env[name]
+  return [name, raw ? value(name) : '']
+}))
 
 const output = resolve(process.cwd(), 'build', 'packaged-env.json')
 await mkdir(dirname(output), { recursive: true })
-await writeFile(output, `${JSON.stringify(Object.fromEntries(names.map((name) => [name, value(name)])), null, 2)}\n`)
-console.log(`Wrote ${names.length} packaged environment variables to ${output}`)
+await writeFile(output, `${JSON.stringify(values, null, 2)}\n`)
+if (missing.length) {
+  console.log(`Wrote ${names.length} packaged environment variables (${missing.length} empty; ALLOW_EMPTY_PACKAGED_ENV=1) to ${output}`)
+} else {
+  console.log(`Wrote ${names.length} packaged environment variables to ${output}`)
+}

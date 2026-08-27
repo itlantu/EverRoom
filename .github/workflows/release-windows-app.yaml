@@ -86,6 +86,11 @@ jobs:
 
       - name: Build app and bundled runtimes
         shell: bash
+        env:
+          # Tag releases require the repo's NXCORE_* vars/secrets; branch
+          # (workflow_dispatch) builds produce an installer with empty
+          # packaged-env values instead of failing on missing config.
+          ALLOW_EMPTY_PACKAGED_ENV: "${{ steps.release.outputs.is-tag == 'true' && '0' || '1' }}"
         run: |
           pnpm build
           pnpm --filter @nxcore/desktop exec node scripts/prepare-open-connector.mjs
