@@ -181,8 +181,167 @@ jobs:
           compression-level: 0
           retention-days: 3
 
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      NXCORE_AGENT_RUNTIME: ${{ vars.NXCORE_AGENT_RUNTIME }}
+      NXCORE_SAAS_API_URL: ${{ vars.NXCORE_SAAS_API_URL }}
+      NXCORE_KNOWLEDGE_ROUTER_ENABLED: ${{ vars.NXCORE_KNOWLEDGE_ROUTER_ENABLED }}
+      NXCORE_KNOWLEDGE_INGEST_DEBOUNCE_MS: ${{ vars.NXCORE_KNOWLEDGE_INGEST_DEBOUNCE_MS }}
+      NXCORE_CONNECTOR_POLL_MS: ${{ vars.NXCORE_CONNECTOR_POLL_MS }}
+      NXCORE_INGEST_FILTER_ENABLED: ${{ vars.NXCORE_INGEST_FILTER_ENABLED }}
+      NXCORE_INGEST_FILTER_MODE: ${{ vars.NXCORE_INGEST_FILTER_MODE }}
+      NXCORE_NANGO_URL: ${{ secrets.NXCORE_NANGO_URL }}
+      NXCORE_NANGO_SECRET: ${{ secrets.NXCORE_NANGO_SECRET }}
+      NXCORE_NANGO_GMAIL_CONFIG_KEY: ${{ secrets.NXCORE_NANGO_GMAIL_CONFIG_KEY }}
+      NXCORE_NANGO_GOOGLE_CLIENT_ID: ${{ secrets.NXCORE_NANGO_GOOGLE_CLIENT_ID }}
+      NXCORE_NANGO_GOOGLE_CLIENT_SECRET: ${{ secrets.NXCORE_NANGO_GOOGLE_CLIENT_SECRET }}
+      NXCORE_NANGO_NOTION_CLIENT_ID: ${{ secrets.NXCORE_NANGO_NOTION_CLIENT_ID }}
+      NXCORE_NANGO_NOTION_CLIENT_SECRET: ${{ secrets.NXCORE_NANGO_NOTION_CLIENT_SECRET }}
+      NXCORE_NANGO_OUTLOOK_CLIENT_ID: ${{ secrets.NXCORE_NANGO_OUTLOOK_CLIENT_ID }}
+      NXCORE_NANGO_OUTLOOK_CLIENT_SECRET: ${{ secrets.NXCORE_NANGO_OUTLOOK_CLIENT_SECRET }}
+      NXCORE_NANGO_OUTLOOK_CONFIG_KEY: ${{ secrets.NXCORE_NANGO_OUTLOOK_CONFIG_KEY }}
+
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          [[ "$GITHUB_REF_NAME" =~ ^desktop-v([0-9]+\.[0-9]+\.[0-9]+)(-nightly\.[0-9]{8}\.[0-9]+)?$ ]] || {
+            echo "Tag $GITHUB_REF_NAME is not a desktop release tag" >&2
+            exit 1
+          }
+          test "${BASH_REMATCH[1]}" = "$version" || {
+            echo "Tag $GITHUB_REF_NAME does not match desktop version $version" >&2
+            exit 1
+          }
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Tagged commit must be on main" >&2
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check types
+        run: pnpm typecheck
+
+      - name: Build app and bundled runtimes
+        shell: bash
+        run: |
+          pnpm build
+          pnpm --filter @nxcore/desktop exec node scripts/prepare-open-connector.mjs
+          pnpm --filter @nxcore/desktop exec node scripts/prepare-oo-cli.mjs
+          pnpm --filter @nxcore/desktop exec node scripts/generate-packaged-env.mjs
+          test -f apps/desktop/build/nango-runtime/packages/server/dist/server.js
+
+      - name: Package Windows x64
+        shell: bash
+        env:
+          # WIN_CSC_LINK: base64 of the Windows code-signing .pfx
+          # WIN_CSC_KEY_PASSWORD: password of that .pfx
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$WIN_CSC_LINK" ]]; then
+            [[ -n "$WIN_CSC_KEY_PASSWORD" ]] || {
+              echo "WIN_CSC_LINK is set but WIN_CSC_KEY_PASSWORD is missing" >&2
+              exit 1
+            }
+          else
+            echo "::warning::WIN_CSC_LINK is not configured; producing an unsigned build."
+          fi
+          pnpm --filter @nxcore/desktop exec electron-builder --win nsis --x64 --publish never
+
+      - name: Audit package contents
+        shell: bash
+        run: |
+          resources="$(find release -type d -path '*/win-unpacked/resources' -print -quit)"
+          test -n "$resources" || { echo "win-unpacked resources were not produced" >&2; exit 1; }
+          forbidden='(^|/)(\.env($|\.)|(__tests__|tests?)(/|$)|[^/]*(\.test|\.spec)\.[^/]+$|(test|spec)\.[^/]+$)|\.map$'
+
+          # nango/ ships a vendored runtime whose compiled dist imports
+          # *.test.js and whose node_modules contains test fixtures — both
+          # required at runtime, so it is exempt from the loose-file audit.
+          loose_files="$(find "$resources" -type f -not -path "$resources/nango/*" -print)"
+          if printf '%s\n' "$loose_files" | grep -Eiq "$forbidden"; then
+            printf '%s\n' "$loose_files" | grep -Ei "$forbidden" >&2
+            exit 1
+          fi
+          nango_loose="$(find "$resources/nango" -type f -print)"
+          printf '%s\n' "$nango_loose" | grep -Eiq '\.env($|\.)' && { printf '%s\n' "$nango_loose" | grep -Ei '\.env($|\.)' >&2; exit 1; }
+          printf '%s\n' "$nango_loose" | grep -Ei '\.(map|ts|tsx|mts|cts)$' && { printf '%s\n' "$nango_loose" | grep -Ei '\.(map|ts|tsx|mts|cts)$' >&2; exit 1; }
+          unexpected_typescript="$(printf '%s\n' "$loose_files" | grep -Ei '\.(ts|tsx|mts|cts)$' | grep -Ev "^$resources/open-connector/" || true)"
+          test -z "$unexpected_typescript" || { printf '%s\n' "$unexpected_typescript" >&2; exit 1; }
+
+          asar_path="$(cd "$resources" && pwd)/app.asar"
+          pnpm --filter @nxcore/desktop exec asar list "$asar_path" > "$RUNNER_TEMP/asar-files.txt"
+          if grep -Eiq "$forbidden" "$RUNNER_TEMP/asar-files.txt"; then
+            grep -Ei "$forbidden" "$RUNNER_TEMP/asar-files.txt" >&2
+            exit 1
+          fi
+          unexpected_typescript="$(grep -Ei '\.(ts|tsx|mts|cts)$' "$RUNNER_TEMP/asar-files.txt" | grep -Eiv '[\\/]node_modules[\\/]@tencentdb-agent-memory[\\/](memory-tencentdb-v2|knowledge-service)[\\/]src[\\/]' || true)"
+          test -z "$unexpected_typescript" || { printf '%s\n' "$unexpected_typescript" >&2; exit 1; }
+
+          grep -Fq 'memory-tencentdb-v2/bin/memory-gateway.mjs' "$RUNNER_TEMP/asar-files.txt"
+          grep -Fq 'memory-tencentdb-v2/src/gateway/server.ts' "$RUNNER_TEMP/asar-files.txt"
+          grep -Fq 'knowledge-service/src/server.ts' "$RUNNER_TEMP/asar-files.txt"
+          grep -Fq '@node-rs/jieba-win32-x64-msvc' "$RUNNER_TEMP/asar-files.txt"
+          grep -Fq '@colbymchenry/codegraph-win32-x64' "$RUNNER_TEMP/asar-files.txt"
+          grep -Fq 'sqlite-vec-windows-x64' "$RUNNER_TEMP/asar-files.txt"
+          test -f "$resources/app.asar.unpacked/node_modules/@esbuild/win32-x64/esbuild.exe"
+          test -f "$resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/win32-x64.node"
+          test -d "$resources/app.asar.unpacked/node_modules/sqlite-vec-windows-x64"
+          test -f "$resources/open-connector/src/server/index.ts"
+          test -f "$resources/nango/packages/server/dist/server.js"
+          test -f "$resources/open-connector/dist/web/index.html"
+          test -f "$resources/oo/win32-x64/oo.exe"
+          "$resources/oo/win32-x64/oo.exe" --version
+
+      - name: Verify artifacts
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          installers=(release/*-windows-x64.exe)
+          test "${#installers[@]}" -eq 1 && test -f "${installers[0]}" || { echo "Expected one Windows installer" >&2; exit 1; }
+          test -d release/win-unpacked || { echo "win-unpacked directory is missing" >&2; exit 1; }
+          test -f release/win-unpacked/resources/gateway/node_modules/better-sqlite3/prebuilds/win32-x64.node
+          ls -l "${installers[0]}"
+          if [[ -n "$WIN_CSC_LINK" ]]; then
+            export SIG_PATH="$(cygpath -w "$PWD/${installers[0]}")"
+            powershell -NoProfile -Command "\$s = Get-AuthenticodeSignature -FilePath \$env:SIG_PATH; if (\$s.Status -ne 'Valid') { Write-Output ('Signature status: ' + \$s.Status); exit 1 }; Write-Output ('Signature status: ' + \$s.Status)"
+          fi
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-assets
+          path: release/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
   publish:
-    needs: [macos]
+    needs: [macos, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -200,6 +359,12 @@ jobs:
           name: macos-assets
           path: release-assets
 
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-assets
+          path: release-assets
+
       - name: Publish prerelease
         shell: bash
         env:
@@ -209,6 +374,7 @@ jobs:
           expected=(
             "release-assets/EverRoom-$version-arm64.dmg"
             "release-assets/EverRoom-$version-arm64.zip"
+            "release-assets/EverRoom-$version-windows-x64.exe"
           )
           files=(release-assets/*)
           test "${#files[@]}" -eq "${#expected[@]}" || {
@@ -218,10 +384,14 @@ jobs:
           for asset in "${expected[@]}"; do
             test -f "$asset" || { echo "Missing release asset: $asset" >&2; exit 1; }
           done
-          if [[ -n "${{ secrets.MAC_CERTS }}" ]]; then
-            notes="Signed and notarized Apple Silicon builds."
+          if [[ -n "${{ secrets.MAC_CERTS }}" ]] && [[ -n "${{ secrets.WIN_CSC_LINK }}" ]]; then
+            notes="Signed and notarized Apple Silicon builds, signed Windows x64 installer."
+          elif [[ -n "${{ secrets.MAC_CERTS }}" ]]; then
+            notes="Signed and notarized Apple Silicon builds; unsigned Windows x64 installer (SmartScreen may warn)."
+          elif [[ -n "${{ secrets.WIN_CSC_LINK }}" ]]; then
+            notes="Signed Windows x64 installer; unsigned Apple Silicon development builds (macOS Gatekeeper may require manual approval before first launch)."
           else
-            notes="Unsigned Apple Silicon development builds. macOS Gatekeeper may require manual approval before first launch."
+            notes="Unsigned development builds for Apple Silicon and Windows x64. macOS Gatekeeper and Windows SmartScreen may require manual approval before first launch."
           fi
           gh release create "$GITHUB_REF_NAME" "${expected[@]}" \
             --verify-tag \
@@ -230,7 +400,7 @@ jobs:
             --notes "$notes"
 
   notify:
-    needs: [macos, publish]
+    needs: [macos, windows, publish]
     if: always()
     runs-on: ubuntu-24.04
     permissions:

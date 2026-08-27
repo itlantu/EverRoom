@@ -9,7 +9,8 @@
     "build": "node scripts/prepare-nango-runtime.mjs && electron-vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package:mac": "node scripts/prepare-open-connector.mjs && node scripts/prepare-oo-cli.mjs && pnpm run build && electron-builder --mac dmg zip --arm64"
+    "package:mac": "node scripts/prepare-open-connector.mjs && node scripts/prepare-oo-cli.mjs && pnpm run build && electron-builder --mac dmg zip --arm64",
+    "package:win": "node scripts/prepare-open-connector.mjs && node scripts/prepare-oo-cli.mjs && pnpm run build && electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@nxcore/agent-contract": "workspace:*",
@@ -89,7 +90,8 @@
     "asarUnpack": [
       "node_modules/@esbuild/**/*",
       "node_modules/sqlite-vec-darwin-arm64/**/*",
-      "node_modules/sqlite-vec-darwin-x64/**/*"
+      "node_modules/sqlite-vec-darwin-x64/**/*",
+      "node_modules/sqlite-vec-windows-x64/**/*"
     ],
     "directories": {
       "output": "../../release"
