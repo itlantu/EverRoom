@@ -71,7 +71,7 @@ jobs:
             echo "is-tag=true" >> "$GITHUB_OUTPUT"
             echo "Ref $GITHUB_REF_NAME validated; this run publishes the installer to the GitHub release."
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "::warning::Ref $GITHUB_REF_NAME is not a desktop-v* tag; building an unsigned development installer without a GitHub release."
+            echo "::warning::Ref $GITHUB_REF_NAME is not a desktop-v* tag; building a development installer without publishing a GitHub release."
             echo "is-tag=false" >> "$GITHUB_OUTPUT"
           else
             echo "Ref $GITHUB_REF_NAME is not a desktop release tag" >&2
