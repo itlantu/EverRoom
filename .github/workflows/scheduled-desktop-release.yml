@@ -125,6 +125,21 @@ jobs:
           done
           exit 1
 
+      - name: Trigger Windows desktop release
+        if: steps.candidate.outputs.pending == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          for attempt in 1 2 3; do
+            if gh workflow run release-windows-app.yaml --repo "$GITHUB_REPOSITORY" --ref "$RELEASE_TAG"; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          exit 1
+
       - name: Notify Feishu when preflight fails
         if: failure()
         shell: bash

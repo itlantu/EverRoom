@@ -268,12 +268,12 @@ pnpm package:win  # Create a Windows NSIS installer (run on Windows)
 
 ### Desktop releases
 
-Desktop releases are driven by GitHub Actions `release-desktop.yml` ("Release desktop app"). Pushing a `desktop-vX.Y.Z` tag (the version must match the `version` in `apps/desktop/package.json`), or manually running the workflow against such a tag, builds in parallel and publishes to the same GitHub Release (prerelease):
+Desktop releases are split into two independent GitHub Actions workflows, both gated on a `desktop-vX.Y.Z` tag (the version must match the `version` in `apps/desktop/package.json`):
 
-- **macOS arm64**: `EverRoom-<version>-arm64.dmg` and `.zip`
-- **Windows x64**: `EverRoom-<version>-windows-x64.exe` (NSIS installer)
+- **`release-desktop.yml` ("Release desktop app")**: builds and publishes the macOS arm64 `EverRoom-<version>-arm64.dmg` and `.zip`; for `workflow_dispatch` you must select an existing `desktop-v*` tag as the ref.
+- **`release-windows-app.yaml` ("Release Windows app")**: builds the Windows x64 `EverRoom-<version>-windows-x64.exe` (NSIS installer). On a `desktop-v*` tag push it attaches the installer to the GitHub Release (waiting for the macOS workflow to create the release first, or creating it itself on timeout); on a manual branch run it builds only and publishes no release — the installer is then available under Actions artifacts.
 
-For `workflow_dispatch`, select an existing `desktop-v*` tag as the ref — the tag validation step rejects other refs. The `scheduled-desktop-release.yml` workflow automatically creates a nightly tag and triggers the build every day at 00:00 Asia/Shanghai when main contains an unpublished version.
+The `scheduled-desktop-release.yml` workflow automatically creates a nightly tag and triggers both workflows every day at 00:00 Asia/Shanghai when main contains an unpublished version.
 
 Signing is optional; builds without signing secrets are produced unsigned with a warning:
 

@@ -311,12 +311,12 @@ pnpm package:win  # 生成 Windows NSIS 安装包（需在 Windows 上执行）
 
 ### 桌面端发布
 
-桌面端发布由 GitHub Actions 的 `release-desktop.yml`（"Release desktop app"）驱动。向仓库推送 `desktop-vX.Y.Z` tag（版本号需与 `apps/desktop/package.json` 的 `version` 一致），或通过 Actions 页面手动选择该 tag 运行，即可并行构建并发布到同一个 GitHub Release（prerelease）：
+桌面端发布分为两个独立的 GitHub Actions 工作流，均以 `desktop-vX.Y.Z` tag 为发布门槛（版本号需与 `apps/desktop/package.json` 的 `version` 一致）：
 
-- **macOS arm64**：`EverRoom-<version>-arm64.dmg` 与 `.zip`
-- **Windows x64**：`EverRoom-<version>-windows-x64.exe`（NSIS 安装包）
+- **`release-desktop.yml`（"Release desktop app"）**：构建并发布 macOS arm64 的 `EverRoom-<version>-arm64.dmg` 与 `.zip`；手动运行时必须选择已经存在的 `desktop-v*` tag 作为 ref。
+- **`release-windows-app.yaml`（"Release Windows app"）**：构建 Windows x64 的 `EverRoom-<version>-windows-x64.exe`（NSIS 安装包）。推送 `desktop-v*` tag 时会把安装包装入 GitHub Release（会先等待 macOS 工作流创建 Release，超时则自行创建）；手动运行时选择分支则只构建、不发布，安装包可在 Actions 的 Artifacts 中下载。
 
-`workflow_dispatch` 手动运行时必须选择已经存在的 `desktop-v*` tag 作为 ref，否则 tag 校验步骤会拒绝执行。维护构建的 `scheduled-desktop-release.yml` 会在每日 00:00（Asia/Shanghai）自动检查 main，为未发布版本创建 nightly tag 并触发构建。
+维护构建的 `scheduled-desktop-release.yml` 会在每日 00:00（Asia/Shanghai）自动检查 main，为未发布版本创建 nightly tag 并触发上述两个工作流。
 
 签名配置（均为可选，未配置时产出未签名构建并输出警告）：
 
